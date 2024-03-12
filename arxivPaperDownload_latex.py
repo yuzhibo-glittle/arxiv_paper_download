@@ -46,8 +46,8 @@ def download_file(url_of_file,name,number_of_threads):
             continue
         t.join()
 
-info_txt_path = 'latex_ids.txt' # todo:1
-save_path = 'Geophysics/200704_202402' # todo: 2
+info_txt_path = ' ' # todo:1
+save_path = ' ' # todo: 2
 
 file = open(info_txt_path)
 for line in file.readlines():
