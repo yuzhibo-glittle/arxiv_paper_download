@@ -1,77 +1,63 @@
-import time
-from selenium import webdriver
 import requests
 import threading
-import os
-import tarfile
+from queue import Queue
 
-def Handler(start, end, url, filename):
-    # specify the starting and ending of the file
-    headers = {'Range': 'bytes=%d-%d' % (start, end)}
-    # request the specified part and get into variable
-    r = requests.get(url, headers=headers, stream=True)
-    # open the file and write the content of the html page into file.
-    with open(filename, "r+b") as fp:
-        fp.seek(start)
-        var = fp.tell()
-        fp.write(r.content)
 
-def download_file(url_of_file,name,number_of_threads):
-    r = requests.head(url_of_file)
-    if name:
-        file_name = name
-    else:
-        file_name = url_of_file.split('/')[-1]
+# 下载单个URL的函数
+def download_url(url, filename):
     try:
-        file_size = int(r.headers['content-length'])
-    except:
-        print("Invalid URL")
-        return
+        response = requests.get(url, stream=True)
+        response.raise_for_status()  # 如果请求失败，会抛出HTTPError异常
+        with open(filename, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    file.write(chunk)
+        print(f"Downloaded {filename}")
+    except Exception as e:
+        print(f"Error downloading {url}: {e}")
 
-    part = int(file_size) / number_of_threads
-    fp = open(file_name, "wb")
-    fp.close()
-    for i in range(number_of_threads):
-        start = int(part * i)
-        end = int(start + part)
-        # create a Thread with start and end locations
-        t = threading.Thread(target=Handler,
-            kwargs={'start': start, 'end': end, 'url': url_of_file, 'filename': file_name})
-        t.setDaemon(True)
-        t.start()
+    # 从队列中获取URL并下载的线程函数
 
-    main_thread = threading.current_thread()
-    for t in threading.enumerate():
-        if t is main_thread:
-            continue
-        t.join()
 
-info_txt_path = ' ' # todo:1
-save_path = ' ' # todo: 2
+def worker(queue, output_dir):
+    while not queue.empty():
+        url = queue.get()
+        filename = f"{output_dir}/{url.split('/')[-1]}"  # 假设URL的最后一个部分是文件名
+        download_url(url, filename+'.tar.gz')
+        queue.task_done()  # 表示任务已完成
 
-file = open(info_txt_path)
-for line in file.readlines():
-    line = line.strip("\n")
-    # print((line))
-    # if line != '\n':
-    src_url = line
-    filename = src_url[-10:]+ '.tar.gz'
-    out_filename = src_url[-10:]
 
-    print('filename:{}, src_url:{}.'.format(filename,src_url))
+# 主函数
+def main(url_file, output_dir, num_threads):
+    if not output_dir.endswith('/'):
+        output_dir += '/'
 
-    # pdf_url = 'https://arxiv.org/pdf/1709.06508.pdf'
-    # tex_url ='https://arxiv.org/src/2402.15383'
+        # 读取URL文件并创建队列
+    with open(url_file, 'r') as f:
+        urls = f.readlines()
+    url_queue = Queue()
+    for url in urls:
+        url_queue.put(url.strip())  # 去除URL字符串两端的空白字符
 
-    print('\nDownloading {} ...'.format(filename))
-    # pdf_url = 'https://arxiv.org/pdf/{}.pdf'.format(arxiv_id)
-    # filename = filename_replace(paper_title) + '.pdf'
-    ts = time.time()
-    download_file(url_of_file=src_url, name=os.path.join(save_path,filename),number_of_threads=10)
+    # 创建并启动线程
+    threads = []
+    for _ in range(num_threads):
+        thread = threading.Thread(target=worker, args=(url_queue, output_dir))
+        thread.start()
+        threads.append(thread)
 
-    #解压
-    # tf = tarfile.open(os.path.join(save_path,filename))
-    # tf.extractall(os.path.join(save_path,out_filename))
+        # 等待所有任务完成
+    url_queue.join()
 
-    te = time.time()
-    print('{:.0f}s [Complete] {}'.format(te-ts, out_filename))
+    # 等待所有线程结束
+    for thread in threads:
+        thread.join()
+
+    print("All downloads completed.")
+
+
+# 示例使用
+url_file = '.txt'
+output_dir = 'src'  # 确保此目录存在或代码中有创建目录的逻辑
+num_threads = 10  # 根据你的机器和需要设置线程数
+main(url_file, output_dir, num_threads)
